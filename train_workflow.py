@@ -174,14 +174,8 @@ class StrokeWorkflow:
         train_inferer = SimpleInferer()
         val_inferer = SlidingWindowInferer(roi_size=(256,256,96), sw_batch_size=1, overlap=0.5)
         
-        self.evaluator = SupervisedEvaluator(
-        device=self.device,
-        val_data_loader=self.val_dataloader,
-        network=self.model,
-        inferer=val_inferer,
-        key_val_metric={"val_dice":self.key_metric},
-        postprocessing=self.val_postprocessing,
-        val_handlers=[
+        
+        val_handlers = [
             StatsHandler(iteration_log=False),
             TensorBoardStatsHandler(log_dir=self.output_dir,iteration_log=False),
             CheckpointSaver(
@@ -192,9 +186,18 @@ class StrokeWorkflow:
                     "lr_scheduler":self.lr_scheduler
                     },
                 save_key_metric=True,
-                key_metric_filename="model.pt",
+                key_metric_filename="best_model.pt",
                 ),
-            ],           
+            ],     
+        
+        self.evaluator = SupervisedEvaluator(
+        device=self.device,
+        val_data_loader=self.val_dataloader,
+        network=self.model,
+        inferer=val_inferer,
+        key_val_metric={"val_dice":self.key_metric},
+        postprocessing=self.val_postprocessing,
+        val_handlers= val_handlers     
         )   
         
         train_handlers = [
@@ -202,17 +205,32 @@ class StrokeWorkflow:
             ValidationHandler(validator=self.evaluator, epoch_level=True, interval=1),
             StatsHandler(tag_name="train_loss", output_transform=from_engine(['loss'], first=True)),
             TensorBoardStatsHandler(log_dir=self.output_dir,tag_name="train_loss", output_transform=from_engine(['loss'], first=True)),
+            CheckpointSaver(
+                save_dir=self.chkpt_dir,
+                save_dict={
+                    "model": self.model,
+                    "optimizer": self.optimizer,
+                    "lr_scheduler": self.lr_scheduler,
+                    "trainer": self.trainer  # Will save state_dict automatically
+                },
+                save_interval=1,  # Save every epoch
+                epoch_level=True,
+                save_final=False,  
+                filename_prefix="checkpoint_epoch_{epoch}",
+                save_key_metric=False
+            )
         ]
         
         if resume_checkpoint is not None:
             logger.info(f"Adding checkpoint loader for resuming training from {resume_checkpoint}")
-            train_handlers.append(
+            train_handlers.insert(0,
                 CheckpointLoader(
                     load_path=resume_checkpoint,
                     load_dict={
                     "model": self.model,
                     "optimizer": self.optimizer,
-                    "lr_scheduler":self.lr_scheduler
+                    "lr_scheduler":self.lr_scheduler,
+                    "trainer": self.trainer 
                     },
                     map_location=self.device
                 )
@@ -229,7 +247,6 @@ class StrokeWorkflow:
         postprocessing=self.train_postprocessing,
         key_train_metric={"train_dice":self.key_metric},
         train_handlers=train_handlers
-        
         )
     
     def freeze_first_n_layers(self, n=None):
