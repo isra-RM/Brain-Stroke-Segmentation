@@ -91,53 +91,20 @@ class StrokeWorkflow:
         deterministic_transforms = Compose([
                             LoadImaged(keys=["image","label"]),
                             EnsureChannelFirstd(keys=["image","label"]),
-                            Resized(keys=["image","label"],
-                                    spatial_size = target_size,
-                                    mode = ("trilinear","nearest")               
-                            ),
+                            Resized(keys=["image","label"], spatial_size = target_size, mode = ("trilinear","nearest")),
                             #ConcatItemsd(keys=["dwi", "flair"],name="image",dim=0),
                             #DeleteItemsd(keys=["dwi", "flair"]),
                             NormalizeIntensityd(keys=["image"], nonzero = True, channel_wise=True)          
                             ])
         
         random_transforms = Compose([
-                            RandSpatialCropd(
-                                keys=["image", "label"],
-                                roi_size=target_size,
-                                random_size = False
-                            ),
-                            RandFlipd(
-                                keys=["image", "label"],
-                                prob = 0.5,
-                                spatial_axis=0
-                                
-                            ),
-                            RandFlipd(
-                                keys=["image", "label"],
-                                prob = 0.5,
-                                spatial_axis=1
-                                
-                            ),
-                            RandFlipd(
-                                keys=["image", "label"],
-                                prob = 0.5,
-                                spatial_axis=2
-                                
-                            ),
-                            RandRotated(
-                                keys=["image", "label"], 
-                                range_x=0.2, range_y=0.2, range_z=0.2, prob=0.5
-                            ),
-                            RandScaleIntensityd(
-                                keys=["image"], 
-                                factors=0.1,
-                                prob=1.0
-                            ),
-                            RandShiftIntensityd(
-                                keys=["image"], 
-                                offsets=0.1,
-                                prob=1.0
-                            )
+                            RandSpatialCropd(keys=["image", "label"],roi_size=target_size, random_size = False),
+                            RandFlipd(keys=["image", "label"],prob = 0.5,spatial_axis=0),
+                            RandFlipd(keys=["image", "label"],prob = 0.5,spatial_axis=1),
+                            RandFlipd(keys=["image", "label"],prob = 0.5,spatial_axis=2),
+                            RandRotated(keys=["image", "label"],range_x=0.2, range_y=0.2, range_z=0.2, prob=0.5),
+                            RandScaleIntensityd(keys=["image"],factors=0.1,prob=1.0),
+                            RandShiftIntensityd(keys=["image"],offsets=0.1,prob=1.0)
                         ])
         post_transforms = Compose([
                 EnsureTyped(keys=["pred","label"], data_type="tensor"),
@@ -157,15 +124,9 @@ class StrokeWorkflow:
         
     def prepare_dataloaders(self):
         
-        self.train_dataloader = DataLoader(self.train_dataset, 
-                                           batch_size=2,
-                                           shuffle=True,
-                                           num_workers=2)
+        self.train_dataloader = DataLoader(self.train_dataset,batch_size=2,shuffle=True,num_workers=2)
         
-        self.val_dataloader = DataLoader(self.val_dataset, 
-                                           batch_size=2,
-                                           shuffle=False,
-                                           num_workers=2)
+        self.val_dataloader = DataLoader(self.val_dataset,batch_size=2,shuffle=False,num_workers=2)
     
     def prepare_training(self, resume_checkpoint = None):
         
@@ -174,22 +135,6 @@ class StrokeWorkflow:
         train_inferer = SimpleInferer()
         val_inferer = SlidingWindowInferer(roi_size=(256,256,96), sw_batch_size=1, overlap=0.5)
         
-        
-        val_handlers = [
-            StatsHandler(iteration_log=False),
-            TensorBoardStatsHandler(log_dir=self.output_dir,iteration_log=False),
-            CheckpointSaver(
-                save_dir=self.chkpt_dir,
-                save_dict={
-                    "model": self.model,
-                    "optimizer": self.optimizer,
-                    "lr_scheduler":self.lr_scheduler
-                    },
-                save_key_metric=True,
-                key_metric_filename="best_model.pt",
-                ),
-            ],     
-        
         self.evaluator = SupervisedEvaluator(
         device=self.device,
         val_data_loader=self.val_dataloader,
@@ -197,44 +142,19 @@ class StrokeWorkflow:
         inferer=val_inferer,
         key_val_metric={"val_dice":self.key_metric},
         postprocessing=self.val_postprocessing,
-        val_handlers= val_handlers     
-        )   
-        
-        train_handlers = [
-            LrScheduleHandler(lr_scheduler=self.lr_scheduler,print_lr=True),
-            ValidationHandler(validator=self.evaluator, epoch_level=True, interval=1),
-            StatsHandler(tag_name="train_loss", output_transform=from_engine(['loss'], first=True)),
-            TensorBoardStatsHandler(log_dir=self.output_dir,tag_name="train_loss", output_transform=from_engine(['loss'], first=True)),
+        val_handlers= [
+            StatsHandler(iteration_log=False),
+            TensorBoardStatsHandler(log_dir=self.output_dir,iteration_log=False),
             CheckpointSaver(
                 save_dir=self.chkpt_dir,
                 save_dict={
                     "model": self.model,
-                    "optimizer": self.optimizer,
-                    "lr_scheduler": self.lr_scheduler,
-                    "trainer": self.trainer  # Will save state_dict automatically
-                },
-                save_interval=1,  # Save every epoch
-                epoch_level=True,
-                save_final=False,  
-                filename_prefix="checkpoint_epoch_{epoch}",
-                save_key_metric=False
-            )
-        ]
-        
-        if resume_checkpoint is not None:
-            logger.info(f"Adding checkpoint loader for resuming training from {resume_checkpoint}")
-            train_handlers.insert(0,
-                CheckpointLoader(
-                    load_path=resume_checkpoint,
-                    load_dict={
-                    "model": self.model,
-                    "optimizer": self.optimizer,
-                    "lr_scheduler":self.lr_scheduler,
-                    "trainer": self.trainer 
                     },
-                    map_location=self.device
+                save_key_metric=True,
+                key_metric_filename="best_model.pt",
                 )
-            )
+            ]         
+        )   
         
         self.trainer = SupervisedTrainer(
         device=self.device,
@@ -246,8 +166,45 @@ class StrokeWorkflow:
         inferer=train_inferer,
         postprocessing=self.train_postprocessing,
         key_train_metric={"train_dice":self.key_metric},
-        train_handlers=train_handlers
+        train_handlers = [
+            LrScheduleHandler(lr_scheduler=self.lr_scheduler,print_lr=True),
+            ValidationHandler(validator=self.evaluator, epoch_level=True, interval=1),
+            StatsHandler(tag_name="train_loss", output_transform=from_engine(['loss'], first=True)),
+            TensorBoardStatsHandler(log_dir=self.output_dir,tag_name="train_loss", output_transform=from_engine(['loss'], first=True)),
+        ]
         )
+        
+        CheckpointSaver(
+            save_dir=self.chkpt_dir,
+            save_dict={
+                "model": self.model,
+                "optimizer": self.optimizer,
+                "lr_scheduler": self.lr_scheduler,
+                "trainer": self.trainer 
+            },
+            save_interval=1,  # Save every epoch
+            epoch_level=True,
+            save_final=False,  
+            save_key_metric=False,
+            n_saved=1
+        ).attach(self.trainer)
+        
+        if resume_checkpoint is not None:
+            logger.info(f"Adding checkpoint loader for resuming training from {resume_checkpoint}")
+            
+            CheckpointLoader(
+                load_path=resume_checkpoint,
+                load_dict={
+                "model": self.model,
+                "optimizer": self.optimizer,
+                "lr_scheduler":self.lr_scheduler,
+                "trainer": self.trainer 
+                },
+                map_location=self.device
+            ).attach(self.trainer)
+
+        
+        
     
     def freeze_first_n_layers(self, n=None):
         
@@ -258,7 +215,7 @@ class StrokeWorkflow:
         layers_frozen = 0
         
         # Freeze the first N layers
-        for i, (name, param) in enumerate(total_params):
+        for i, (_, param) in enumerate(total_params):
             if i < n:
                 param.requires_grad = False
                 layers_frozen += 1
@@ -315,7 +272,7 @@ class StrokeWorkflow:
         if num_layers_freze is not None:
             self.freeze_first_n_layers(num_layers_freze)
                
-    def run(self, pretrained_model_path,num_layers_freze):
+    def train(self, pretrained_model_path,num_layers_freze):
         
         self.prepare_datasets()
         self.prepare_dataloaders()
@@ -326,7 +283,7 @@ class StrokeWorkflow:
         self.prepare_training()
         self.trainer.run()
 
-    def resume_training(self, checkpoint_path):
+    def resume(self, checkpoint_path):
       
         self.prepare_datasets()
         self.prepare_dataloaders()
@@ -345,6 +302,6 @@ if __name__=="__main__":
         
     stroke_segm = StrokeWorkflow(dataset_dir=dataset_dir,output_dir=output_dir,chkpt_dir=chkpt_dir,max_epochs=50)
     
-    #stroke_segm.run(pretrained_model_path='pretrained_model.pt',num_layers_freze=0)
-    stroke_segm.resume_training(checkpoint_path=os.path.join(chkpt_dir,'model.pt'))
+    stroke_segm.train(pretrained_model_path='pretrained_model.pt',num_layers_freze=0)
+    #stroke_segm.resume(checkpoint_path=os.path.join(chkpt_dir))
 
