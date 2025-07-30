@@ -123,7 +123,7 @@ class StrokeSegmentationWorkflow:
         """Create file list for given index range"""
         # Convert to Path objects
         dataset_path = Path(self.dataset_dir)
-        image_dir = dataset_path/'Images'
+        image_dir = dataset_path/'DWIs'
         label_dir = dataset_path/'Labels'
         
         # Get sorted lists of NIfTI files using pathlib
