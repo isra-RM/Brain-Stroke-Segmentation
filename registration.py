@@ -4,6 +4,8 @@ from tqdm import tqdm  # Import tqdm
 
 def coregister_img(folder_path):
     # Get list of subdirectories
+    folder_path = Path(folder_path)
+    
     subdirs = [d for d in folder_path.iterdir() if d.is_dir()]
     
     # Wrap subdirs with tqdm for progress bar
@@ -47,5 +49,5 @@ def coregister_img(folder_path):
 
 if __name__ == "__main__":
     
-    folder_path = Path("D:\\Trabajo\\Code\\Brain Stroke Segmentation\\ISLE2022")
+    folder_path = "D:\\Trabajo\\Code\\Brain Stroke Segmentation\\ISLE2022"
     coregister_img(folder_path)
