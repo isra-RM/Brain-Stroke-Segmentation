@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Tuple
 from monai.losses import DiceLoss 
 from monai.transforms import (
     Compose, NormalizeIntensityd, AsDiscreted, LoadImaged, EnsureChannelFirstd,
-    Resized, RandSpatialCropd, RandFlipd, RandRotate90d, Rand3DElasticd,RandBiasFieldd,
+    Resized, Rand3DElasticd, RandFlipd, RandRotate90d, Rand3DElasticd,RandBiasFieldd,
     RandShiftIntensityd, EnsureTyped, Activationsd, EnsureTyped, KeepLargestConnectedComponentd
 )
 from monai.networks.nets import UNet, SegResNet # Changed to UNet
@@ -175,8 +175,7 @@ class StrokeSegmentationWorkflow:
                 RandFlipd(keys=["image", "label"], prob=0.2, spatial_axis=1),
                 RandFlipd(keys=["image", "label"], prob=0.2, spatial_axis=2),
                 RandRotate90d(keys=["image", "label"],max_k=3, prob=0.2),
-                #RandScaleIntensityd(keys=["image"], factors=0.1, prob=1.0),
-                #Rand3DElasticd(keys=["image", "label"], sigma_range=(5,7),padding_mode='zeros',prob=0.2, mode=("trilinear","nearest")),
+                #Rand3DElasticd(keys=["image", "label"], sigma_range=(5,7),magnitude_range=(50,100),padding_mode='zeros',prob=0.2, mode=("trilinear","nearest")),
                 RandBiasFieldd(keys=["image"],coeff_range=(0.1,0.2),prob=0.2),
                 RandShiftIntensityd(keys=["image"], offsets=0.1, prob=1.0)
             ])
@@ -246,7 +245,10 @@ class StrokeSegmentationWorkflow:
     
     def prepare_training(self, resume_checkpoint: Optional[str] = None):
         
-        logger.info("Setting up training engines...") 
+        if resume_checkpoint is not None and Path(resume_checkpoint).exists():
+            logger.info(f"Resuming training from {resume_checkpoint}...")
+        else:
+            logger.info("Setting up training engines...") 
         
         train_inferer = SimpleInferer()
         #val_inferer = SlidingWindowInferer(roi_size=(196,196,80), sw_batch_size=1, overlap=0.5)
@@ -436,10 +438,10 @@ class StrokeSegmentationWorkflow:
         # Handle pretrained weights
         if pretrained_path is not None and Path(pretrained_path).exists():
             self.load_pretrained_weights(pretrained_path, freeze_layers)
-            
-        if checkpoint_path is not None and Path(checkpoint_path).exists():
-            logger.info(f"Resuming training from {checkpoint_path}...")
+        # Handle saevd checkpoint   
+        elif checkpoint_path is not None and Path(checkpoint_path).exists():
             self.prepare_training(resume_checkpoint=checkpoint_path)
+        # Handle training from scratch    
         else:
             self.prepare_training(resume_checkpoint=None)
         
