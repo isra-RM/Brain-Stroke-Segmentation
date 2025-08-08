@@ -477,4 +477,4 @@ if __name__ == "__main__":
         
     workflow = StrokeSegmentationWorkflow(dataset_dir=dataset_dir,output_dir=output_dir,chkpt_dir=chkpt_dir)
     # Run training
-    workflow.train(train_indices=(0, 200),val_indices=(201, 249),pretrained_path=pretrained_path,freeze_layers=0)
+    workflow.train(train_indices=(0, 199),val_indices=(200, 249),pretrained_path=pretrained_path,freeze_layers=0)
