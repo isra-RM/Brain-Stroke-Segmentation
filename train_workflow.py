@@ -4,10 +4,11 @@ import sys
 from pathlib import Path
 import logging
 import torch
+from torchinfo import summary
 from typing import Dict, List, Optional, Tuple
 from monai.losses import DiceLoss 
 from monai.transforms import (
-    Compose, NormalizeIntensityd, AsDiscreted, LoadImaged, EnsureChannelFirstd,Spacingd,
+    Compose, NormalizeIntensityd, AsDiscreted, LoadImaged, EnsureChannelFirstd,ConcatItemsd,DeleteItemsd,
     Resized, Rand3DElasticd, RandFlipd, RandRotate90d, Rand3DElasticd,RandBiasFieldd,SpatialPadd,
     RandShiftIntensityd, EnsureTyped, Activationsd, EnsureTyped, KeepLargestConnectedComponentd
 )
@@ -84,13 +85,15 @@ class StrokeSegmentationWorkflow:
         """Initialize segmentation model"""
         self.model = SegResNet(
             spatial_dims=3,
-            in_channels=1,
+            in_channels=2,
             out_channels=1,
             init_filters=16,
             blocks_down=(1, 2, 2, 4),
             blocks_up=(1, 1, 1),
             dropout_prob=0.2
         ).to(self.device)
+
+        summary(self.model)
         
     def _initialize_loss(self):
         """Initialize loss function"""
@@ -124,27 +127,35 @@ class StrokeSegmentationWorkflow:
         """Create file list for given index range"""
         # Convert to Path objects
         dataset_path = Path(self.dataset_dir)
-        image_dir = dataset_path/'DWIs'
+        dwi_dir = dataset_path/'DWIs'
+        flair_dir = dataset_path/'FLAIRs'
         label_dir = dataset_path/'Labels'
         
         # Get sorted lists of NIfTI files using pathlib
-        images = sorted(image_dir.glob('*.nii.gz'))
+        dwis = sorted(dwi_dir.glob('*.nii.gz'))
+        flairs = sorted(flair_dir.glob('*.nii.gz'))
         labels = sorted(label_dir.glob('*.nii.gz'))
         
         # Verify we found files
-        if not images:
-            raise FileNotFoundError(f"No images found in {image_dir}")
+        if not dwis:
+            raise FileNotFoundError(f"No images found in {dwi_dir}")
+        if not flairs:
+            raise FileNotFoundError(f"No images found in {flair_dir}")
         if not labels:
             raise FileNotFoundError(f"No labels found in {label_dir}")
         
         # Check for mismatched counts
-        if len(images) != len(labels):
-            raise ValueError(f"Mismatched files: {len(images)} images vs {len(labels)} labels")
+        if len(dwis) != len(labels):
+            raise ValueError(f"Mismatched files: {len(dwis)} images vs {len(labels)} labels")
+        if len(flairs) != len(labels):
+            raise ValueError(f"Mismatched files: {len(flairs)} images vs {len(labels)} labels")
+        if len(flairs) != len(dwis):
+            raise ValueError(f"Mismatched files: {len(flairs)} images vs {len(dwis)} labels")
         
         # Create dictionary list with string paths
         datalist = [
-            {'image': str(img), 'label': str(lbl)} 
-            for img, lbl in zip(images, labels)
+            {'dwi': str(dwi),'flair':str(flair),'label': str(lbl)} 
+            for dwi,flair,lbl in zip(dwis, flairs, labels)
         ]
         
         # Validate indices
@@ -159,10 +170,12 @@ class StrokeSegmentationWorkflow:
     def create_transforms(self, augment: bool = False) -> Compose:
         """Create data transformation pipeline"""
         det_transforms = Compose([
-            LoadImaged(keys=["image", "label"]),
-            EnsureChannelFirstd(keys=["image", "label"]),
-            Resized(keys=["image", "label"],spatial_size=(176,176,64),mode=("trilinear", "nearest")),
-            NormalizeIntensityd(keys=["image"], nonzero=True, channel_wise=True)
+            LoadImaged(keys=["dwi","flair", "label"]),
+            EnsureChannelFirstd(keys=["dwi","flair", "label"]),
+            Resized(keys=["dwi","flair", "label"],spatial_size=(176,176,64),mode=("trilinear","trilinear", "nearest")),
+            NormalizeIntensityd(keys=["dwi","flair"], nonzero=True, channel_wise=True),
+            ConcatItemsd(keys=["dwi","flair"],name = "image",dim = 0),
+            DeleteItemsd(keys=["dwi","flair"])
         ])
         
         if augment:
@@ -359,12 +372,13 @@ class StrokeSegmentationWorkflow:
             
             # Handle input channel mismatch
             #if 'convInit.conv.weight' in pretrained_dict:
-            # Pretrained has 4 input channels, we have 1
+            # Pretrained has 4 input channels, we have 2
             init_weights = pretrained_dict['convInit.conv.weight']
             out_weights = pretrained_dict['conv_final.2.conv.weight'] 
             out_bias = pretrained_dict['conv_final.2.conv.bias']  
             # Option 1: Use mean of all input channels
-            adapted_init_weights = init_weights.mean(dim=1, keepdim=True)
+            #adapted_init_weights = init_weights.mean(dim=1, keepdim=True)
+            adapted_init_weights = torch.cat((init_weights.mean(dim=1, keepdim=True), init_weights.mean(dim=1, keepdim=True)), dim=1) 
             adapted_out_weights = out_weights.mean(dim=0, keepdim=True)
             adapted_out_bias = out_bias.mean(dim=0, keepdim=True)   
             # Option 2: Use just the first channel (if you know it's most relevant)
